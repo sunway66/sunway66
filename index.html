@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>顺为数据 · A股复盘</title>
+  <meta name="description" content="顺为数据：A股全市场涨跌分布、涨跌停与沪深北成交额，以及4只沪深300ETF一级市场申赎复盘。">
+  <meta name="theme-color" content="#f7f8fa" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0b0d10" media="(prefers-color-scheme: dark)">
+  <meta name="color-scheme" content="light dark">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="顺为数据">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="顺为数据首页">
+        <span class="brand-mark" aria-hidden="true">
+          <span></span><span></span><span></span><span></span>
+        </span>
+        <span class="brand-name">顺为数据</span>
+        <span class="badge" id="demoBadge" hidden>演示</span>
+      </a>
+      <button class="install-btn" id="installBtn" type="button" hidden>安装到桌面</button>
+    </header>
+
+    <main>
+      <section class="market-card" aria-labelledby="marketTitle">
+        <div class="market-head">
+          <div>
+            <p class="eyebrow">MARKET BREADTH</p>
+            <h1 id="marketTitle">大盘盘面</h1>
+          </div>
+          <div class="market-status" aria-live="polite">
+            <span class="status-dot" id="statusDot" aria-hidden="true"></span>
+            <span id="statusText">读取中</span>
+            <span class="status-date" id="statusDate">—</span>
+          </div>
+        </div>
+
+        <div class="market-pulse" aria-label="全市场涨跌家数">
+          <div class="pulse-item pulse-up">
+            <span>上涨</span>
+            <strong id="upCount">—</strong>
+          </div>
+          <div class="pulse-item">
+            <span>平盘</span>
+            <strong id="flatCount">—</strong>
+          </div>
+          <div class="pulse-item pulse-down">
+            <span>下跌</span>
+            <strong id="downCount">—</strong>
+          </div>
+          <div class="pulse-item pulse-total">
+            <span>交易个股</span>
+            <strong id="totalCount">—</strong>
+          </div>
+        </div>
+
+        <div class="breadth-chart-wrap">
+          <canvas id="breadthChart" aria-label="A股涨跌幅区间分布柱状图" role="img"></canvas>
+        </div>
+
+        <p class="market-note" id="marketNote">正在读取全市场行情</p>
+      </section>
+
+      <section class="market-summary" aria-label="市场汇总">
+        <div class="summary-item">
+          <span>涨停家数</span>
+          <strong id="limitUp">—</strong>
+        </div>
+        <div class="summary-item">
+          <span>跌停家数</span>
+          <strong id="limitDown">—</strong>
+        </div>
+        <div class="summary-item summary-turnover">
+          <span>沪深北三市成交额</span>
+          <strong id="turnover">—</strong>
+          <small id="turnoverBreakdown"></small>
+        </div>
+      </section>
+
+      <section class="etf-section" aria-labelledby="etfTitle">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">ETF REVIEW</p>
+            <h2 id="etfTitle">ETF 复盘</h2>
+          </div>
+          <div class="range-switch" id="rangeSwitch" role="group" aria-label="图表时间范围">
+            <button type="button" data-range="30">近30日</button>
+            <button type="button" data-range="90">近90日</button>
+            <button type="button" data-range="180" class="active">全部</button>
+          </div>
+        </div>
+
+        <article class="panel" aria-labelledby="netTitle">
+          <div class="panel-head">
+            <div>
+              <p class="panel-index">01</p>
+              <h3 id="netTitle">每日净申购</h3>
+            </div>
+            <span class="unit">亿元</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="netChart" aria-label="4只ETF每日净申购折线图" role="img"></canvas>
+          </div>
+          <p class="chart-note">正值为净申购，负值为净赎回 · 一级市场口径，不等同场内资金净流入</p>
+        </article>
+
+        <article class="panel" aria-labelledby="scaleTitle">
+          <div class="panel-head">
+            <div>
+              <p class="panel-index">02</p>
+              <h3 id="scaleTitle">ETF 总市值</h3>
+            </div>
+            <span class="unit">亿元</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="scaleChart" aria-label="4只ETF总市值折线图" role="img"></canvas>
+          </div>
+          <p class="chart-note">份额 × 单位净值，即基金资产规模</p>
+        </article>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>数据来源：上交所 / 深交所 / 东方财富 · 经 AKShare 获取</p>
+      <p class="footer-meta" id="footerMeta">仅供个人复盘，不构成投资建议</p>
+    </footer>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>
+    <div class="noscript">此页面需要启用 JavaScript 才能读取 data.json 并绘制图表。</div>
+  </noscript>
+</body>
+</html>
