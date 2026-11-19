@@ -31,14 +31,17 @@
 | 510330 | 华夏沪深300ETF | 上交所 |
 | 159919 | 嘉实沪深300ETF | 深交所 |
 
-- 近 180 个交易日每日份额、单位净值；
+- 近 5 年（约 1250 个交易日）每日份额、单位净值；
 - 每日净申购折线图；
-- 每日总市值折线图；
-- 近 30 / 90 / 180 日切换；
+- 每日总市值折线图，含四只 ETF 合计曲线（虚线）；
+- 60日 / 1年 / 3年 / 5年切换；
+- 沪深300风险溢价图：`1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率`；
+- 沪深300指数收盘点位曲线图；
 - 份额拆分/合并自动识别，事件日净申购记 0。
 
 ### PWA
 
+- 右上角刷新按钮，重新拉取 data.json；
 - 可添加到 iPhone / Android 桌面；
 - Service Worker 缓存页面和最近一次 `data.json`；
 - 图表库不可用时自动切换内置 Canvas 兼容渲染。
@@ -77,6 +80,17 @@
 - 总市值仍用原始份额 × 净值；
 - `events` 记录事件。
 
+### 沪深300风险溢价
+
+```text
+风险溢价(%) = 1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率(%)
+```
+
+- 市盈率TTM来自中证指数；
+- 10年期国债收益率来自中债；
+- 两者按交易日对齐，任一缺失则当天风险溢价留空；
+- 指数曲线使用沪深300每日收盘点位。
+
 ---
 
 ## 数据源
@@ -90,6 +104,9 @@
 | 深交所每日 ETF 份额 | 深交所基金规模日频 | `fund_scale_daily_szse(start_date, end_date, symbol="ETF")` |
 | 场内基金历史单位净值 | 东方财富天天基金 | `fund_etf_fund_info_em(fund, start_date, end_date)` |
 | 交易日历 | 新浪财经 | `tool_trade_date_hist_sina()` |
+| 沪深300市盈率TTM | 中证指数 | `index_value_csindex(symbol="000300")` |
+| 10年期国债收益率 | 中债 | `bond_zh_us_yield_em(start_date=...)` |
+| 沪深300指数收盘点位 | 中证指数 | `index_hist_csindex(symbol="000300", ...)` |
 
 官方页面：
 
@@ -97,7 +114,7 @@
 - 深交所基金规模日频：<https://www.szse.cn/market/fund/volume/etf/index.html>
 - 东方财富历史净值示例：<https://fundf10.eastmoney.com/jjjz_510300.html>
 
-> 东方财富、腾讯、新浪的实时行情接口只能提供价格、成交额、IOPV 等，**没有 180 天每日 ETF 份额历史**。核心份额必须用交易所公开数据；交易所接口本身免费。
+> 东方财富、腾讯、新浪的实时行情接口只能提供价格、成交额、IOPV 等，**没有长周期每日 ETF 份额历史**。核心份额必须用交易所公开数据；交易所接口本身免费。
 
 ---
 
@@ -140,7 +157,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# 首次完整回补近 180 个交易日 + 当日大盘盘面
+# 首次完整回补约 5 年（1250 个交易日）+ 当日大盘盘面
 python scripts/fetch_data.py --full --output data.json
 
 # 之后日常增量更新
@@ -165,7 +182,7 @@ python -m unittest discover -s tests -v
 
 ```text
 --output PATH       输出文件，默认仓库根目录 data.json
---days N            输出交易日数量，默认 180
+--days N            输出交易日数量，默认 1250（约 5 年）
 --full              忽略已有 data.json，完整回补
 --end-date YYYY-MM-DD  指定截止日期（调试用）
 ```
@@ -271,8 +288,8 @@ schedule:
     "latest_trade_date": "2026-11-05",
     "is_stale": true,
     "stale_reason": "最新交易日 ... 尚未完整发布",
-    "trading_days": 180,
-    "window_start": "2026-02-05",
+    "trading_days": 1250,
+    "window_start": "2022-01-20",
     "window_end": "2026-11-04",
     "missing_latest": { "shares": [], "nav": [] }
   },
@@ -326,6 +343,14 @@ schedule:
       { "key": "lt_10", "label": "<-10%", "side": "down", "count": 20 }
     ]
   },
+  "csi300": {
+    "risk_premium": [5.18, "..."],
+    "index_close": [3900.12, "..."],
+    "pe_ttm": [14.2, "..."],
+    "bond_yield": [1.85, "..."],
+    "formula": "1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率",
+    "source": "中证指数沪深300市盈率TTM；中债10年期国债收益率；中证指数沪深300收盘点位"
+  },
   "events": []
 }
 ```
@@ -371,7 +396,7 @@ schedule:
 
 ### 首次回补很慢
 
-上交所份额接口按日期查询，180 个交易日约需 180 次请求。只在首次或 `--full` 时发生；日常增量只抓最近 8 个交易日和缺失日期。
+上交所份额接口按日期查询，5 年约需 1250 次请求。脚本已用少量并发加速，首次回补仍需较长时间；日常增量只抓最近 8 个交易日和缺失日期。
 
 ---
 

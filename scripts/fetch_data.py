@@ -24,6 +24,7 @@ import math
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -36,8 +37,8 @@ SHANGHAI = ZoneInfo("Asia/Shanghai")
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = ROOT / "data.json"
 SCHEMA_VERSION = 1
-DEFAULT_DAYS = 180
-MAX_HISTORY_DAYS = 260
+DEFAULT_DAYS = 1250
+MAX_HISTORY_DAYS = 1300
 
 logging.basicConfig(
     level=logging.INFO,
@@ -361,14 +362,18 @@ def _retry(description: str, func: Any, attempts: int = 3, pause: float = 1.2) -
 
 
 def fetch_sse_shares(dates: Iterable[date]) -> dict[date, dict[str, float]]:
-    """抓取上交所每日 ETF 份额，返回 {日期: {代码: 亿份}}。"""
+    """抓取上交所每日 ETF 份额，返回 {日期: {代码: 亿份}}。
+
+    5 年历史约 1250 个交易日，逐日串行太慢，这里用少量并发请求。
+    """
     targets = sorted(set(dates))
     if not targets:
         return {}
 
     ak = _ak()
     result: dict[date, dict[str, float]] = {}
-    for index, item_date in enumerate(targets, start=1):
+
+    def fetch_one(item_date: date) -> tuple[date, dict[str, float]]:
         stamp = item_date.strftime("%Y%m%d")
         frame = _retry(
             f"上交所份额 {stamp}",
@@ -378,7 +383,7 @@ def fetch_sse_shares(dates: Iterable[date]) -> dict[date, dict[str, float]]:
         )
         if frame is None or frame.empty:
             logger.warning("上交所 %s 无份额数据", stamp)
-            continue
+            return item_date, {}
 
         day_values: dict[str, float] = {}
         for _, row in frame.iterrows():
@@ -388,12 +393,23 @@ def fetch_sse_shares(dates: Iterable[date]) -> dict[date, dict[str, float]]:
             shares = _share_to_yi(row.get("基金份额"))
             if shares is not None:
                 day_values[code] = shares
-        if day_values:
-            result[item_date] = day_values
+        return item_date, day_values
 
-        if index % 20 == 0 or index == len(targets):
-            logger.info("上交所份额进度 %s/%s", index, len(targets))
-        time.sleep(0.12)
+    completed = 0
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(fetch_one, item_date): item_date for item_date in targets}
+        for future in as_completed(futures):
+            completed += 1
+            try:
+                item_date, day_values = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("上交所份额任务异常：%s", exc)
+                continue
+            if day_values:
+                result[item_date] = day_values
+            if completed % 50 == 0 or completed == len(targets):
+                logger.info("上交所份额进度 %s/%s", completed, len(targets))
+            time.sleep(0.03)
 
     return result
 
@@ -439,8 +455,8 @@ def fetch_szse_shares(start: date, end: date) -> dict[date, dict[str, float]]:
 def fetch_navs(codes: Iterable[str], start: date, end: date) -> dict[str, dict[date, float]]:
     """抓取东方财富场内基金历史单位净值，返回 {代码: {日期: 净值}}。"""
     ak = _ak()
-    result: dict[str, dict[date, float]] = {}
-    for code in sorted(set(codes)):
+
+    def fetch_one(code: str) -> tuple[str, dict[date, float]]:
         frame = _retry(
             f"东方财富净值 {code}",
             lambda c=code: ak.fund_etf_fund_info_em(
@@ -453,7 +469,7 @@ def fetch_navs(codes: Iterable[str], start: date, end: date) -> dict[str, dict[d
         )
         if frame is None or frame.empty:
             logger.warning("%s 无净值数据", code)
-            continue
+            return code, {}
 
         values: dict[date, float] = {}
         for _, row in frame.iterrows():
@@ -462,11 +478,22 @@ def fetch_navs(codes: Iterable[str], start: date, end: date) -> dict[str, dict[d
             if item_date is not None and nav is not None and nav > 0:
                 values[item_date] = nav
         if values:
-            result[code] = values
             logger.info("%s 净值 %s 条（%s ~ %s）", code, len(values), min(values), max(values))
         else:
             logger.warning("%s 净值数据为空", code)
-        time.sleep(0.15)
+        return code, values
+
+    result: dict[str, dict[date, float]] = {}
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(fetch_one, code): code for code in sorted(set(codes))}
+        for future in as_completed(futures):
+            try:
+                code, values = future.result()
+            except Exception as exc:  # noqa: BLE001
+                logger.error("净值任务异常：%s", exc)
+                continue
+            if values:
+                result[code] = values
 
     return result
 
@@ -483,7 +510,6 @@ def fetch_market_snapshot(market_date: date) -> dict[str, Any] | None:
     if frame is None or frame.empty:
         logger.warning("全市场行情为空，无法生成大盘盘面")
         return None
-
     required = {"代码", "名称", "涨跌幅", "成交额"}
     missing = required - set(frame.columns)
     if missing:
@@ -521,6 +547,111 @@ def fetch_market_snapshot(market_date: date) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # 已有数据与合并
 # ---------------------------------------------------------------------------
+
+
+def fetch_csi300_data(start: date, end: date) -> dict[date, dict[str, float | None]]:
+    """抓取沪深300市盈率TTM、10年期国债收益率和指数收盘点位。
+
+    风险溢价 = 1 / 市盈率TTM × 100 - 10年期国债到期收益率。
+    """
+    ak = _ak()
+
+    pe_frame = None
+    for function_name in ("stock_zh_index_value_csindex", "index_value_csindex"):
+        function = getattr(ak, function_name, None)
+        if function is None:
+            continue
+        pe_frame = _retry(
+            f"沪深300估值（{function_name}）",
+            lambda f=function: f(symbol="000300"),
+            attempts=3,
+            pause=1.5,
+        )
+        if pe_frame is not None and not pe_frame.empty:
+            break
+
+    bond_frame = _retry(
+        "中国10年期国债收益率",
+        lambda: ak.bond_zh_us_yield_em(start_date=start.strftime("%Y%m%d")),
+        attempts=3,
+        pause=2.0,
+    )
+
+    index_frame = _retry(
+        "沪深300指数",
+        lambda: ak.index_hist_csindex(
+            symbol="000300",
+            start_date=start.strftime("%Y%m%d"),
+            end_date=end.strftime("%Y%m%d"),
+        ),
+        attempts=3,
+        pause=1.5,
+    )
+    if index_frame is None or index_frame.empty:
+        logger.warning("中证指数历史行情为空，尝试东方财富指数历史")
+        index_frame = _retry(
+            "东方财富沪深300指数",
+            lambda: ak.index_zh_a_hist(
+                symbol="000300",
+                period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+            ),
+            attempts=3,
+            pause=1.5,
+        )
+
+    pe_map: dict[date, float] = {}
+    if pe_frame is not None and not pe_frame.empty:
+        pe_column = "市盈率2" if "市盈率2" in pe_frame.columns else "市盈率TTM"
+        if pe_column in pe_frame.columns:
+            for _, row in pe_frame.iterrows():
+                item_date = _as_date(row.get("日期"))
+                pe = _as_float(row.get(pe_column))
+                if item_date is not None and pe is not None and pe > 0:
+                    pe_map[item_date] = pe
+        else:
+            logger.warning("中证指数估值表缺少市盈率TTM字段")
+
+    bond_map: dict[date, float] = {}
+    if bond_frame is not None and not bond_frame.empty:
+        bond_column = next(
+            (column for column in bond_frame.columns if "中国" in str(column) and "10年" in str(column)),
+            "中国国债收益率10年",
+        )
+        if bond_column in bond_frame.columns:
+            for _, row in bond_frame.iterrows():
+                item_date = _as_date(row.get("日期"))
+                bond = _as_float(row.get(bond_column))
+                if item_date is not None and bond is not None:
+                    bond_map[item_date] = bond
+
+    index_map: dict[date, float] = {}
+    if index_frame is not None and not index_frame.empty:
+        close_column = "收盘" if "收盘" in index_frame.columns else "收盘价"
+        if close_column in index_frame.columns:
+            for _, row in index_frame.iterrows():
+                item_date = _as_date(row.get("日期"))
+                close = _as_float(row.get(close_column))
+                if item_date is not None and close is not None and close > 0:
+                    index_map[item_date] = close
+
+    all_dates = set(pe_map) | set(bond_map) | set(index_map)
+    result: dict[date, dict[str, float | None]] = {}
+    for item_date in all_dates:
+        result[item_date] = {
+            "pe_ttm": pe_map.get(item_date),
+            "bond_yield": bond_map.get(item_date),
+            "index_close": index_map.get(item_date),
+        }
+
+    logger.info(
+        "沪深300数据：PE(TTM) %s 条，10年国债 %s 条，指数 %s 条",
+        len(pe_map),
+        len(bond_map),
+        len(index_map),
+    )
+    return result
 
 
 def load_existing(path: Path) -> dict[str, Any] | None:
@@ -645,6 +776,7 @@ def build_payload(
     now: datetime | None = None,
     demo: bool = False,
     market: dict[str, Any] | None = None,
+    csi300: dict[date, dict[str, float | None]] | None = None,
 ) -> dict[str, Any]:
     """由份额/净值映射生成前端 data.json。"""
     now = now or datetime.now(SHANGHAI)
@@ -792,6 +924,31 @@ def build_payload(
     if market_payload:
         market_payload["is_stale"] = market_payload.get("date") != latest_trade_date.isoformat()
 
+    csi300_payload: dict[str, Any] | None = None
+    if csi300:
+        risk_values: list[float | None] = []
+        close_values: list[float | None] = []
+        pe_values: list[float | None] = []
+        bond_values: list[float | None] = []
+        for day in output_dates:
+            values = csi300.get(day, {})
+            pe = values.get("pe_ttm")
+            bond = values.get("bond_yield")
+            close = values.get("index_close")
+            risk = (100.0 / pe - bond) if pe and pe > 0 and bond is not None else None
+            risk_values.append(round(risk, 2) if risk is not None else None)
+            close_values.append(round(close, 2) if close is not None else None)
+            pe_values.append(round(pe, 2) if pe is not None else None)
+            bond_values.append(round(bond, 4) if bond is not None else None)
+        csi300_payload = {
+            "risk_premium": risk_values,
+            "index_close": close_values,
+            "pe_ttm": pe_values,
+            "bond_yield": bond_values,
+            "formula": "1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率",
+            "source": "中证指数沪深300市盈率TTM；中债10年期国债收益率；中证指数沪深300收盘点位",
+        }
+
     return {
         "schema_version": SCHEMA_VERSION,
         "demo": demo,
@@ -831,6 +988,7 @@ def build_payload(
         "series": series,
         "previous": previous_payload,
         "market": market_payload,
+        "csi300": csi300_payload,
         "events": events,
     }
 
@@ -869,7 +1027,7 @@ def write_payload(path: Path, payload: dict[str, Any]) -> bool:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="抓取沪深300ETF份额与净值，生成 data.json")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="输出文件路径")
-    parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help="输出交易日数量，默认 180")
+    parser.add_argument("--days", type=int, default=DEFAULT_DAYS, help="输出交易日数量，默认 1250（约 5 年）")
     parser.add_argument("--full", action="store_true", help="忽略已有数据，完整回补")
     parser.add_argument("--end-date", type=str, default=None, help="截止日期 YYYY-MM-DD，默认今天")
     return parser.parse_args(argv)
@@ -951,6 +1109,10 @@ def main(argv: list[str] | None = None) -> int:
         market["stale_reason"] = "当日全市场行情暂不可用，展示上一次成功获取的数据"
         logger.warning("保留已有大盘盘面数据：%s", market.get("date"))
 
+    csi300 = fetch_csi300_data(trade_dates[0], end_date)
+    if not csi300:
+        logger.warning("沪深300风险溢价/指数数据为空，前端两张新图将留空")
+
     payload = build_payload(
         FUNDS,
         trade_dates,
@@ -959,6 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
         days=days,
         demo=False,
         market=market,
+        csi300=csi300,
     )
 
     if not payload["dates"]:

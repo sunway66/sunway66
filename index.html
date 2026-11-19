@@ -28,7 +28,14 @@
         <span class="brand-name">顺为数据</span>
         <span class="badge" id="demoBadge" hidden>演示</span>
       </a>
-      <button class="install-btn" id="installBtn" type="button" hidden>安装到桌面</button>
+      <div class="header-actions">
+        <button class="icon-btn" id="refreshBtn" type="button" aria-label="刷新数据" title="刷新数据">
+          <svg class="refresh-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20 11a8 8 0 1 0-2.34 6.66M20 4v7h-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+        </button>
+        <button class="install-btn" id="installBtn" type="button" hidden>安装到桌面</button>
+      </div>
     </header>
 
     <main>
@@ -94,9 +101,10 @@
             <h2 id="etfTitle">ETF 复盘</h2>
           </div>
           <div class="range-switch" id="rangeSwitch" role="group" aria-label="图表时间范围">
-            <button type="button" data-range="30">近30日</button>
-            <button type="button" data-range="90">近90日</button>
-            <button type="button" data-range="180" class="active">全部</button>
+            <button type="button" data-range="60" class="active">60日</button>
+            <button type="button" data-range="250">1年</button>
+            <button type="button" data-range="750">3年</button>
+            <button type="button" data-range="1250">5年</button>
           </div>
         </div>
 
@@ -125,7 +133,50 @@
           <div class="chart-wrap">
             <canvas id="scaleChart" aria-label="4只ETF总市值折线图" role="img"></canvas>
           </div>
-          <p class="chart-note">份额 × 单位净值，即基金资产规模</p>
+          <p class="chart-note">实线为单只 ETF，虚线为四只合计 · 份额 × 单位净值</p>
+        </article>
+      </section>
+
+      <section class="csi-section" aria-labelledby="csiTitle">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">CSI 300</p>
+            <h2 id="csiTitle">沪深300</h2>
+          </div>
+          <div class="range-switch" id="rangeSwitchCsi" role="group" aria-label="沪深300图表时间范围">
+            <button type="button" data-range="60" class="active">60日</button>
+            <button type="button" data-range="250">1年</button>
+            <button type="button" data-range="750">3年</button>
+            <button type="button" data-range="1250">5年</button>
+          </div>
+        </div>
+
+        <article class="panel" aria-labelledby="riskTitle">
+          <div class="panel-head">
+            <div>
+              <p class="panel-index">03</p>
+              <h3 id="riskTitle">沪深300风险溢价</h3>
+            </div>
+            <span class="unit">%</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="riskChart" aria-label="沪深300风险溢价折线图" role="img"></canvas>
+          </div>
+          <p class="chart-note">1 / 沪深300市盈率TTM × 100 − 10年期国债到期收益率</p>
+        </article>
+
+        <article class="panel" aria-labelledby="indexTitle">
+          <div class="panel-head">
+            <div>
+              <p class="panel-index">04</p>
+              <h3 id="indexTitle">沪深300指数</h3>
+            </div>
+            <span class="unit">点</span>
+          </div>
+          <div class="chart-wrap">
+            <canvas id="indexChart" aria-label="沪深300指数曲线图" role="img"></canvas>
+          </div>
+          <p class="chart-note">沪深300指数每日收盘点位</p>
         </article>
       </section>
     </main>

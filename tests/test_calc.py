@@ -196,6 +196,49 @@ class MarketPayloadTests(unittest.TestCase):
         self.assertEqual(payload["market"]["date"], "2026-01-07")
         self.assertFalse(payload["market"]["is_stale"])
 
+    def test_csi300_risk_premium_formula(self) -> None:
+        csi300 = {
+            date(2026, 1, 5): {"pe_ttm": 10.0, "bond_yield": 2.0, "index_close": 4000.0},
+            date(2026, 1, 6): {"pe_ttm": 12.5, "bond_yield": 1.8, "index_close": 4050.0},
+            date(2026, 1, 7): {"pe_ttm": 15.0, "bond_yield": 1.7, "index_close": 4100.0},
+        }
+        payload = build_payload(
+            FUNDS,
+            [date(2026, 1, 5), date(2026, 1, 6), date(2026, 1, 7)],
+            {fund.code: {date(2026, 1, 5): 100.0, date(2026, 1, 6): 101.0, date(2026, 1, 7): 102.0} for fund in FUNDS},
+            {fund.code: {date(2026, 1, 5): 2.0, date(2026, 1, 6): 2.0, date(2026, 1, 7): 2.0} for fund in FUNDS},
+            days=3,
+            csi300=csi300,
+        )
+        self.assertEqual(payload["csi300"]["risk_premium"][0], 8.0)
+        self.assertEqual(payload["csi300"]["risk_premium"][1], 6.2)
+        self.assertEqual(payload["csi300"]["index_close"][-1], 4100.0)
+
+
+class FetchConcurrencyTests(unittest.TestCase):
+    def test_parallel_sse_fetch_keeps_all_dates(self) -> None:
+        import pandas as pd
+        from unittest.mock import patch
+
+        from fetch_data import fetch_sse_shares
+
+        class FakeAk:
+            @staticmethod
+            def fund_etf_scale_sse(date: str):
+                return pd.DataFrame(
+                    {
+                        "基金代码": ["510300", "510310", "510330"],
+                        "基金份额": [10_000_000_000, 20_000_000_000, 30_000_000_000],
+                    }
+                )
+
+        days = [date(2026, 1, 5), date(2026, 1, 6), date(2026, 1, 7)]
+        with patch("fetch_data._ak", return_value=FakeAk()):
+            result = fetch_sse_shares(days)
+
+        self.assertEqual(sorted(result), days)
+        self.assertEqual(result[days[0]]["510300"], 100.0)
+
 
 class MainFlowTests(unittest.TestCase):
     def test_main_flow_with_mocked_sources(self) -> None:
@@ -223,6 +266,14 @@ class MainFlowTests(unittest.TestCase):
                     "down": 1,
                     "flat": 0,
                     "distribution": [],
+                },
+            ),
+            patch(
+                "fetch_data.fetch_csi300_data",
+                return_value={
+                    date(2026, 1, 5): {"pe_ttm": 10.0, "bond_yield": 2.0, "index_close": 4000.0},
+                    date(2026, 1, 6): {"pe_ttm": 11.0, "bond_yield": 2.0, "index_close": 4010.0},
+                    date(2026, 1, 7): {"pe_ttm": 12.0, "bond_yield": 2.0, "index_close": 4020.0},
                 },
             ),
             patch("fetch_data.write_payload", return_value=True) as writer,

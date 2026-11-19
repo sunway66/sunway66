@@ -6,7 +6,7 @@
  *  - Chart.js CDN：cache-first
  */
 
-const CACHE_VERSION = "shunwei-data-v5";
+const CACHE_VERSION = "shunwei-data-v11";
 const CACHE_NAME = `${CACHE_VERSION}-shell`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 

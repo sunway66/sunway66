@@ -36,7 +36,7 @@ END_SHARES = {
 }
 
 END_DATE = date(2026, 11, 4)
-TRADE_DATES = [item.date() for item in pd.bdate_range(end=END_DATE, periods=181)]
+TRADE_DATES = [item.date() for item in pd.bdate_range(end=END_DATE, periods=1251)]
 
 
 def make_fund_series(code: str, seed: int) -> tuple[list[float], list[float]]:
@@ -96,6 +96,24 @@ def make_market_snapshot() -> dict:
     }
 
 
+def make_csi300_series() -> dict[date, dict[str, float]]:
+    rng = random.Random(20261104)
+    result: dict[date, dict[str, float]] = {}
+    pe = 14.2
+    bond = 1.85
+    close = 3900.0
+    for index, item_date in enumerate(TRADE_DATES):
+        pe = max(9.0, min(18.0, pe + rng.gauss(0, 0.04)))
+        bond = max(1.2, min(3.2, bond + rng.gauss(0, 0.006)))
+        close = max(2800.0, close * (1 + rng.gauss(0.0002, 0.008)))
+        result[item_date] = {
+            "pe_ttm": round(pe, 2),
+            "bond_yield": round(bond, 4),
+            "index_close": round(close, 2),
+        }
+    return result
+
+
 def main() -> None:
     shares_map: dict[str, dict[date, float]] = {}
     nav_map: dict[str, dict[date, float]] = {}
@@ -109,10 +127,11 @@ def main() -> None:
         TRADE_DATES,
         shares_map,
         nav_map,
-        days=180,
+        days=1250,
         now=datetime(2026, 11, 4, 20, 30, tzinfo=__import__("zoneinfo").ZoneInfo("Asia/Shanghai")),
         demo=True,
         market=make_market_snapshot(),
+        csi300=make_csi300_series(),
     )
     payload["meta"]["latest_trade_date"] = END_DATE.isoformat()
     payload["meta"]["is_stale"] = False

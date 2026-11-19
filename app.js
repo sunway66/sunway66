@@ -19,16 +19,16 @@ const numberFormatter = new Intl.NumberFormat("zh-CN", {
 const state = {
   data: null,
   range: readRange(),
-  charts: { breadth: null, net: null, scale: null },
+  charts: { breadth: null, net: null, scale: null, risk: null, index: null },
   chartLoader: null,
 };
 
 function readRange() {
   try {
     const saved = Number(localStorage.getItem("shunwei-range"));
-    return [30, 90, 180].includes(saved) ? saved : 180;
+    return [60, 250, 750, 1250].includes(saved) ? saved : 60;
   } catch (error) {
-    return 180;
+    return 60;
   }
 }
 
@@ -86,9 +86,10 @@ function formatChineseDate(iso) {
   return `${parts.year}年${Number(parts.month)}月${Number(parts.day)}日`;
 }
 
-function formatShortDate(iso) {
+function formatChartDate(iso) {
   const parts = splitIsoDate(iso);
   if (!parts) return "";
+  if (state.range >= 750) return `${parts.year.slice(2)}/${parts.month}`;
   return `${parts.month}/${parts.day}`;
 }
 
@@ -152,7 +153,7 @@ function showToast(message, timeout = 2800) {
 /* Data loading                                                               */
 /* -------------------------------------------------------------------------- */
 
-async function loadData() {
+async function loadData({ manual = false } = {}) {
   setLoadingState();
 
   try {
@@ -162,9 +163,13 @@ async function loadData() {
     validateData(data);
     state.data = data;
     renderAll();
+    if (manual) showToast("数据已刷新");
+    return true;
   } catch (error) {
     console.error("读取 data.json 失败", error);
     showLoadError(error);
+    if (manual) showToast("刷新失败，保留当前页面数据");
+    return false;
   }
 }
 
@@ -192,6 +197,17 @@ function validateData(data) {
 
   if (data.market && !Array.isArray(data.market.distribution)) {
     throw new Error("market.distribution 格式不正确");
+  }
+
+  if (data.csi300) {
+    for (const key of ["risk_premium", "index_close", "pe_ttm", "bond_yield"]) {
+      if (!Array.isArray(data.csi300[key])) {
+        throw new Error(`csi300.${key} 格式不正确`);
+      }
+      if (data.csi300[key].length !== data.dates.length) {
+        throw new Error(`csi300.${key} 与日期长度不一致`);
+      }
+    }
   }
 }
 
@@ -352,6 +368,8 @@ async function renderCharts() {
     if (state.data.dates.length) {
       setChartEmpty("netChart", "图表加载中…", "正在加载 Chart.js；网络不可用时会切换兼容渲染。");
       setChartEmpty("scaleChart", "图表加载中…", "正在加载 Chart.js；网络不可用时会切换兼容渲染。");
+      setChartEmpty("riskChart", "图表加载中…", "正在加载 Chart.js；网络不可用时会切换兼容渲染。");
+      setChartEmpty("indexChart", "图表加载中…", "正在加载 Chart.js；网络不可用时会切换兼容渲染。");
     }
   }
 
@@ -366,12 +384,15 @@ async function renderCharts() {
     Chart.defaults.color = chartColors().muted;
     renderBreadthChart();
     renderEtfCharts();
+    renderCsiCharts();
     document.body.dataset.chartRenderer = "chartjs";
   } catch (error) {
     console.warn("Chart.js 渲染失败，切换到兼容渲染", error);
     state.charts.breadth?.destroy();
     state.charts.net?.destroy();
     state.charts.scale?.destroy();
+    state.charts.risk?.destroy();
+    state.charts.index?.destroy();
     renderFallbackCharts();
   }
 }
@@ -525,7 +546,7 @@ function renderEtfCharts() {
   state.charts.net = new Chart($("#netChart").getContext("2d"), {
     type: "line",
     data: {
-      labels: slice.dates.map(formatShortDate),
+      labels: slice.dates.map(formatChartDate),
       datasets: slice.funds.map((fund) => ({
         label: fund.short_name,
         code: fund.code,
@@ -547,23 +568,186 @@ function renderEtfCharts() {
   state.charts.scale = new Chart($("#scaleChart").getContext("2d"), {
     type: "line",
     data: {
-      labels: slice.dates.map(formatShortDate),
-      datasets: slice.funds.map((fund) => ({
-        label: fund.short_name,
-        code: fund.code,
-        data: slice.series[fund.code].market_value,
-        borderColor: fund.color,
-        backgroundColor: fund.color,
-        borderWidth: 1.8,
-        pointRadius: 0,
-        pointHoverRadius: 3.5,
-        pointHitRadius: 12,
-        tension: 0.28,
-        spanGaps: false,
-      })),
+      labels: slice.dates.map(formatChartDate),
+      datasets: [
+        ...slice.funds.map((fund) => ({
+          label: fund.short_name,
+          code: fund.code,
+          data: slice.series[fund.code].market_value,
+          borderColor: fund.color,
+          backgroundColor: fund.color,
+          borderWidth: 1.8,
+          pointRadius: 0,
+          pointHoverRadius: 3.5,
+          pointHitRadius: 12,
+          tension: 0.28,
+          spanGaps: false,
+        })),
+        {
+          label: "四只合计",
+          data: totalMarketValueSeries(slice),
+          borderColor: colors.text,
+          backgroundColor: colors.text,
+          borderWidth: 2.4,
+          borderDash: [6, 4],
+          pointRadius: 0,
+          pointHoverRadius: 3.5,
+          pointHitRadius: 12,
+          tension: 0.28,
+          spanGaps: false,
+        },
+      ],
     },
     options: etfOptions(colors, slice.dates, "scale"),
   });
+}
+
+function totalMarketValueSeries(slice) {
+  return slice.dates.map((_, index) => {
+    const values = slice.funds.map((fund) => slice.series[fund.code].market_value[index]);
+    return values.every((value) => Number.isFinite(value))
+      ? values.reduce((sum, value) => sum + value, 0)
+      : null;
+  });
+}
+
+function renderCsiCharts() {
+  const slice = visibleSlice();
+  if (!slice.csi300) {
+    state.charts.risk?.destroy();
+    state.charts.index?.destroy();
+    state.charts.risk = null;
+    state.charts.index = null;
+    setChartEmpty("riskChart", "暂无风险溢价数据", "等待沪深300估值和国债收益率数据更新。");
+    setChartEmpty("indexChart", "暂无指数数据", "等待沪深300指数历史数据更新。");
+    return;
+  }
+
+  const colors = chartColors();
+  const hasRisk = slice.csi300.risk_premium.some((value) => Number.isFinite(value));
+  const hasIndex = slice.csi300.index_close.some((value) => Number.isFinite(value));
+
+  state.charts.risk?.destroy();
+  state.charts.index?.destroy();
+
+  if (hasRisk) {
+    clearChartEmpty("riskChart");
+    state.charts.risk = new Chart($("#riskChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: slice.dates.map(formatChartDate),
+        datasets: [{
+          label: "风险溢价",
+          data: slice.csi300.risk_premium,
+          borderColor: "#5b6fdb",
+          backgroundColor: "#5b6fdb",
+          borderWidth: 1.8,
+          pointRadius: 0,
+          pointHoverRadius: 3.5,
+          pointHitRadius: 12,
+          tension: 0.25,
+          spanGaps: false,
+        }],
+      },
+      options: csiOptions(colors, slice.dates, "risk"),
+      plugins: [zeroLinePlugin(colors.zero)],
+    });
+  } else {
+    setChartEmpty("riskChart", "暂无风险溢价数据", "市盈率TTM或国债收益率暂不可用。");
+  }
+
+  if (hasIndex) {
+    clearChartEmpty("indexChart");
+    state.charts.index = new Chart($("#indexChart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: slice.dates.map(formatChartDate),
+        datasets: [{
+          label: "沪深300",
+          data: slice.csi300.index_close,
+          borderColor: colors.text,
+          backgroundColor: colors.text,
+          borderWidth: 1.8,
+          pointRadius: 0,
+          pointHoverRadius: 3.5,
+          pointHitRadius: 12,
+          tension: 0.25,
+          spanGaps: false,
+        }],
+      },
+      options: csiOptions(colors, slice.dates, "index"),
+    });
+  } else {
+    setChartEmpty("indexChart", "暂无指数数据", "沪深300指数历史数据暂不可用。");
+  }
+}
+
+function csiOptions(colors, dates, mode) {
+  const isRisk = mode === "risk";
+  const compact = window.innerWidth < 520;
+  const xTickLimit = compact ? 4 : 7;
+  const yTickLimit = compact ? 4 : 6;
+
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    animation: false,
+    layout: { padding: { top: 7, right: 14, bottom: 0, left: 0 } },
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        backgroundColor: colors.tooltip,
+        titleColor: "#ffffff",
+        bodyColor: "#e2e8f0",
+        borderColor: "rgba(255,255,255,0.14)",
+        borderWidth: 1,
+        padding: 9,
+        cornerRadius: 8,
+        displayColors: false,
+        callbacks: {
+          title: (items) => {
+            const index = items[0]?.dataIndex;
+            return index === undefined ? "" : formatChineseDate(dates[index]);
+          },
+          label: (context) => isRisk
+            ? `风险溢价 ${formatSigned(context.parsed.y)}%`
+            : `沪深300 ${formatNumber(context.parsed.y)} 点`,
+        },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        border: { display: false },
+        ticks: {
+          color: colors.muted,
+          maxRotation: 0,
+          autoSkip: false,
+          font: { size: 9.5, weight: "500" },
+          callback: (value, index) => {
+            const total = dates.length;
+            if (total <= xTickLimit) return formatChartDate(dates[index]);
+            if (index === 0 || index === total - 1) return formatChartDate(dates[index]);
+            const step = Math.max(1, Math.ceil((total - 1) / (xTickLimit - 1)));
+            return index % step === 0 ? formatChartDate(dates[index]) : "";
+          },
+        },
+      },
+      y: {
+        grid: { color: colors.grid, drawTicks: false },
+        border: { display: false },
+        grace: "5%",
+        ticks: {
+          color: colors.muted,
+          padding: 7,
+          maxTicksLimit: yTickLimit,
+          font: { size: 9.5, weight: "500" },
+          callback: (value) => isRisk ? `${formatAxis(value)}%` : formatAxis(value),
+        },
+      },
+    },
+  };
 }
 
 function etfOptions(colors, dates, mode) {
@@ -628,10 +812,10 @@ function etfOptions(colors, dates, mode) {
           font: { size: 9.5, weight: "500" },
           callback: (value, index) => {
             const total = dates.length;
-            if (total <= xTickLimit) return formatShortDate(dates[index]);
-            if (index === 0 || index === total - 1) return formatShortDate(dates[index]);
+            if (total <= xTickLimit) return formatChartDate(dates[index]);
+            if (index === 0 || index === total - 1) return formatChartDate(dates[index]);
             const step = Math.max(1, Math.ceil((total - 1) / (xTickLimit - 1)));
-            return index % step === 0 ? formatShortDate(dates[index]) : "";
+            return index % step === 0 ? formatChartDate(dates[index]) : "";
           },
         },
       },
@@ -672,7 +856,7 @@ function zeroLinePlugin(color) {
 }
 
 function visibleSlice() {
-  const { dates, series, funds } = state.data;
+  const { dates, series, funds, csi300 } = state.data;
   const count = Math.min(state.range, dates.length);
   const start = Math.max(0, dates.length - count);
   return {
@@ -687,6 +871,12 @@ function visibleSlice() {
         }];
       }),
     ),
+    csi300: csi300
+      ? {
+          risk_premium: csi300.risk_premium.slice(start),
+          index_close: csi300.index_close.slice(start),
+        }
+      : null,
   };
 }
 
@@ -708,6 +898,8 @@ function renderFallbackCharts() {
   if (!state.data.dates.length) {
     setChartEmpty("netChart", "暂无净申购数据", "抓取脚本生成 data.json 后显示。");
     setChartEmpty("scaleChart", "暂无总市值数据", "抓取脚本生成 data.json 后显示。");
+    setChartEmpty("riskChart", "暂无风险溢价数据", "抓取脚本生成 data.json 后显示。");
+    setChartEmpty("indexChart", "暂无指数数据", "抓取脚本生成 data.json 后显示。");
     return;
   }
 
@@ -724,16 +916,57 @@ function renderFallbackCharts() {
   });
   drawFallbackLineChart($("#scaleChart"), {
     dates: slice.dates,
-    datasets: slice.funds.map((fund) => ({
-      label: fund.short_name,
-      color: fund.color,
-      values: slice.series[fund.code].market_value,
-    })),
+    datasets: [
+      ...slice.funds.map((fund) => ({
+        label: fund.short_name,
+        color: fund.color,
+        values: slice.series[fund.code].market_value,
+      })),
+      {
+        label: "四只合计",
+        color: colors.text,
+        values: totalMarketValueSeries(slice),
+        dash: [6, 4],
+        width: 2.4,
+      },
+    ],
     mode: "scale",
     colors,
   });
   clearChartEmpty("netChart");
   clearChartEmpty("scaleChart");
+
+  if (slice.csi300?.risk_premium?.some((value) => Number.isFinite(value))) {
+    drawFallbackLineChart($("#riskChart"), {
+      dates: slice.dates,
+      datasets: [{
+        label: "风险溢价",
+        color: "#5b6fdb",
+        values: slice.csi300.risk_premium,
+      }],
+      mode: "percent",
+      colors,
+    });
+    clearChartEmpty("riskChart");
+  } else {
+    setChartEmpty("riskChart", "暂无风险溢价数据", "市盈率TTM或国债收益率暂不可用。");
+  }
+
+  if (slice.csi300?.index_close?.some((value) => Number.isFinite(value))) {
+    drawFallbackLineChart($("#indexChart"), {
+      dates: slice.dates,
+      datasets: [{
+        label: "沪深300",
+        color: colors.text,
+        values: slice.csi300.index_close,
+      }],
+      mode: "index",
+      colors,
+    });
+    clearChartEmpty("indexChart");
+  } else {
+    setChartEmpty("indexChart", "暂无指数数据", "沪深300指数历史数据暂不可用。");
+  }
 }
 
 function drawFallbackBreadthChart(canvas, market, colors) {
@@ -844,6 +1077,8 @@ function drawFallbackLineChart(canvas, config) {
 
   const { colors, mode, dates, datasets } = config;
   const isNet = mode === "net";
+  const isPercent = mode === "percent";
+  const hasZeroLine = isNet || isPercent;
   const compact = width < 430;
   const left = compact ? 37 : 45;
   const right = 8;
@@ -854,7 +1089,7 @@ function drawFallbackLineChart(canvas, config) {
   if (plotWidth <= 10 || plotHeight <= 10) return;
 
   const values = datasets.flatMap((dataset) => dataset.values).filter((value) => Number.isFinite(value));
-  if (isNet) values.push(0);
+  if (hasZeroLine) values.push(0);
   if (!values.length) return;
 
   let min = Math.min(...values);
@@ -885,10 +1120,15 @@ function drawFallbackLineChart(canvas, config) {
     ctx.stroke();
     ctx.fillStyle = colors.muted;
     ctx.textAlign = "right";
-    ctx.fillText(isNet && value > 0 ? `+${formatAxis(value)}` : formatAxis(value), left - 5, y);
+    const label = isPercent
+      ? `${formatAxis(value)}%`
+      : isNet && value > 0
+        ? `+${formatAxis(value)}`
+        : formatAxis(value);
+    ctx.fillText(label, left - 5, y);
   }
 
-  if (isNet) {
+  if (hasZeroLine) {
     ctx.strokeStyle = colors.zero;
     ctx.setLineDash([4, 4]);
     const zeroY = yFor(0);
@@ -910,12 +1150,13 @@ function drawFallbackLineChart(canvas, config) {
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
   for (const index of [...new Set(tickIndices)]) {
-    ctx.fillText(formatShortDate(dates[index]), xFor(index), top + plotHeight + 7);
+    ctx.fillText(formatChartDate(dates[index]), xFor(index), top + plotHeight + 7);
   }
 
   for (const dataset of datasets) {
     ctx.strokeStyle = dataset.color;
-    ctx.lineWidth = 1.8;
+    ctx.lineWidth = dataset.width || 1.8;
+    ctx.setLineDash(dataset.dash || []);
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -935,6 +1176,7 @@ function drawFallbackLineChart(canvas, config) {
       }
     });
     ctx.stroke();
+    ctx.setLineDash([]);
 
     const lastIndex = findLastIndex(dataset.values, (value) => Number.isFinite(value));
     if (lastIndex >= 0) {
@@ -947,12 +1189,17 @@ function drawFallbackLineChart(canvas, config) {
 
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  const legendY = height - 14;
+  let legendY = height - 14;
+  let legendRow = 0;
   let legendX = left;
   for (const dataset of datasets) {
     const textWidth = ctx.measureText(dataset.label).width;
     const itemWidth = textWidth + 18;
-    if (legendX + itemWidth > width - right) legendX = left;
+    if (legendX + itemWidth > width - right) {
+      legendRow += 1;
+      legendX = left;
+      legendY = height - 14 - legendRow * 12;
+    }
     ctx.fillStyle = dataset.color;
     ctx.beginPath();
     ctx.arc(legendX + 3, legendY, 2.6, 0, Math.PI * 2);
@@ -1007,6 +1254,8 @@ function showLoadError(error) {
   setChartEmpty("breadthChart", "暂无大盘数据", "data.json 读取失败，修复后刷新页面。");
   setChartEmpty("netChart", "暂无图表", "data.json 读取失败，修复后刷新页面。");
   setChartEmpty("scaleChart", "暂无图表", "data.json 读取失败，修复后刷新页面。");
+  setChartEmpty("riskChart", "暂无图表", "data.json 读取失败，修复后刷新页面。");
+  setChartEmpty("indexChart", "暂无图表", "data.json 读取失败，修复后刷新页面。");
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1014,7 +1263,7 @@ function showLoadError(error) {
 /* -------------------------------------------------------------------------- */
 
 function updateRangeButtons() {
-  $$("#rangeSwitch button").forEach((button) => {
+  $$(".range-switch button").forEach((button) => {
     const active = Number(button.dataset.range) === state.range;
     button.classList.toggle("active", active);
     button.setAttribute("aria-pressed", String(active));
@@ -1022,10 +1271,10 @@ function updateRangeButtons() {
 }
 
 function bindRangeControls() {
-  $$("#rangeSwitch button").forEach((button) => {
+  $$(".range-switch button").forEach((button) => {
     button.addEventListener("click", () => {
       const range = Number(button.dataset.range);
-      if (![30, 90, 180].includes(range)) return;
+      if (![60, 250, 750, 1250].includes(range)) return;
       state.range = range;
       try {
         localStorage.setItem("shunwei-range", String(range));
@@ -1035,6 +1284,22 @@ function bindRangeControls() {
       updateRangeButtons();
       if (state.data) renderCharts();
     });
+  });
+}
+
+function bindRefreshButton() {
+  const button = $("#refreshBtn");
+  if (!button) return;
+  button.addEventListener("click", async () => {
+    if (button.disabled) return;
+    button.disabled = true;
+    button.classList.add("is-loading");
+    try {
+      await loadData({ manual: true });
+    } finally {
+      button.disabled = false;
+      button.classList.remove("is-loading");
+    }
   });
 }
 
@@ -1106,6 +1371,7 @@ function debounce(callback, delay) {
 
 function init() {
   bindRangeControls();
+  bindRefreshButton();
   bindInstallPrompt();
   bindNetworkStatus();
   registerServiceWorker();

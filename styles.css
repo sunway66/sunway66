@@ -152,6 +152,50 @@ a {
   transition: border-color 150ms ease, color 150ms ease;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--text-soft);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  border-color: var(--text-soft);
+}
+
+.icon-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.refresh-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.icon-btn.is-loading .refresh-icon {
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .install-btn:hover {
   color: var(--text);
   border-color: var(--text-soft);
@@ -282,6 +326,10 @@ a {
 /* ETF --------------------------------------------------------------------- */
 
 .etf-section {
+  margin-top: 30px;
+}
+
+.csi-section {
   margin-top: 30px;
 }
 
@@ -573,6 +621,10 @@ a {
     margin-top: 24px;
   }
 
+  .csi-section {
+    margin-top: 24px;
+  }
+
   .section-head {
     align-items: center;
   }
@@ -615,6 +667,12 @@ a {
 }
 
 @media (max-width: 370px) {
+  .range-switch button {
+    min-width: 39px;
+    padding: 0 6px;
+    font-size: 9px;
+  }
+
   .market-status .status-date {
     display: none;
   }
@@ -641,5 +699,9 @@ a {
   *::before,
   *::after {
     transition-duration: 0.001ms !important;
+  }
+
+  .icon-btn.is-loading .refresh-icon {
+    animation: none;
   }
 }
