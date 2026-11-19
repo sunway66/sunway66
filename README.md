@@ -88,6 +88,7 @@
 
 - 市盈率TTM来自中证指数；
 - 10年期国债收益率来自中债；
+- 韭圈儿 PE TTM 为周频数据，按最近一次可得值对齐到交易日；
 - 两者按交易日对齐，任一缺失则当天风险溢价留空；
 - 指数曲线使用沪深300每日收盘点位。
 
@@ -104,9 +105,9 @@
 | 深交所每日 ETF 份额 | 深交所基金规模日频 | `fund_scale_daily_szse(start_date, end_date, symbol="ETF")` |
 | 场内基金历史单位净值 | 东方财富天天基金 | `fund_etf_fund_info_em(fund, start_date, end_date)` |
 | 交易日历 | 新浪财经 | `tool_trade_date_hist_sina()` |
-| 沪深300市盈率TTM | 中证指数 | `index_value_csindex(symbol="000300")` |
-| 10年期国债收益率 | 中债 | `bond_zh_us_yield_em(start_date=...)` |
-| 沪深300指数收盘点位 | 中证指数 | `index_hist_csindex(symbol="000300", ...)` |
+| 沪深300市盈率TTM | 韭圈儿指数估值 / 中证指数 | Danjuan PE history，AKShare 兜底 |
+| 10年期国债收益率 | 东方财富 / 中债 | 东方财富国债收益率接口，AKShare 兜底 |
+| 沪深300指数收盘点位 | 东方财富 / 中证指数 | 东方财富指数日线，AKShare 兜底 |
 
 官方页面：
 
@@ -349,7 +350,7 @@ schedule:
     "pe_ttm": [14.2, "..."],
     "bond_yield": [1.85, "..."],
     "formula": "1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率",
-    "source": "中证指数沪深300市盈率TTM；中债10年期国债收益率；中证指数沪深300收盘点位"
+    "source": "韭圈儿/中证指数沪深300市盈率TTM；中债10年期国债到期收益率；中证指数沪深300收盘点位"
   },
   "events": []
 }

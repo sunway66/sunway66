@@ -549,92 +549,222 @@ def fetch_market_snapshot(market_date: date) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 
 
+def _fetch_danjuan_pe() -> dict[date, float]:
+    """韭圈儿指数估值历史：沪深300 PE TTM（周频，用于长历史）。"""
+    import requests
+
+    try:
+        response = requests.get(
+            "https://danjuanfunds.com/djapi/index_eva/pe_history/SH000300",
+            params={"day": "all"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        items = response.json().get("data", {}).get("index_eva_pe_growths", [])
+        result: dict[date, float] = {}
+        for item in items:
+            timestamp = _as_float(item.get("ts"))
+            pe = _as_float(item.get("pe"))
+            if timestamp is None or pe is None or pe <= 0:
+                continue
+            item_date = datetime.fromtimestamp(timestamp / 1000, SHANGHAI).date()
+            result[item_date] = pe
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("韭圈儿 PE TTM 历史获取失败：%s", exc)
+        return {}
+
+
+def _fetch_eastmoney_bond(start: date) -> dict[date, float]:
+    """东方财富中美国债收益率：中国10年期国债收益率。"""
+    import requests
+
+    url = "https://datacenter.eastmoney.com/api/data/get"
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://data.eastmoney.com/"}
+    result: dict[date, float] = {}
+    try:
+        first = requests.get(
+            url,
+            params={
+                "type": "RPTA_WEB_TREASURYYIELD",
+                "sty": "ALL",
+                "st": "SOLAR_DATE",
+                "sr": "-1",
+                "token": "894050c76af8597a853f5b408b759f5d",
+                "p": "1",
+                "ps": "500",
+                "pageNo": "1",
+                "pageNum": "1",
+            },
+            headers=headers,
+            timeout=20,
+        )
+        first.raise_for_status()
+        first_json = first.json()
+        pages = int(first_json.get("result", {}).get("pages", 1))
+        for page in range(1, min(pages, 20) + 1):
+            response = requests.get(
+                url,
+                params={
+                    "type": "RPTA_WEB_TREASURYYIELD",
+                    "sty": "ALL",
+                    "st": "SOLAR_DATE",
+                    "sr": "-1",
+                    "token": "894050c76af8597a853f5b408b759f5d",
+                    "p": str(page),
+                    "ps": "500",
+                    "pageNo": str(page),
+                    "pageNum": str(page),
+                },
+                headers=headers,
+                timeout=20,
+            )
+            response.raise_for_status()
+            rows = response.json().get("result", {}).get("data", [])
+            oldest: date | None = None
+            for row in rows:
+                item_date = _as_date(row.get("SOLAR_DATE"))
+                yield_value = _as_float(row.get("EMM00166466"))
+                if item_date is None or yield_value is None:
+                    continue
+                result[item_date] = yield_value
+                if oldest is None or item_date < oldest:
+                    oldest = item_date
+            if oldest is not None and oldest < start:
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("东方财富10年期国债收益率获取失败：%s", exc)
+    return result
+
+
+def _fetch_eastmoney_index(start: date, end: date) -> dict[date, float]:
+    """东方财富沪深300指数日线。"""
+    import requests
+
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
+    try:
+        response = requests.get(
+            url,
+            params={
+                "secid": "1.000300",
+                "klt": "101",
+                "fqt": "0",
+                "beg": start.strftime("%Y%m%d"),
+                "end": end.strftime("%Y%m%d"),
+                "fields1": "f1,f2,f3,f4,f5,f6",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            },
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=20,
+        )
+        response.raise_for_status()
+        klines = response.json().get("data", {}).get("klines", [])
+        result: dict[date, float] = {}
+        for line in klines:
+            parts = str(line).split(",")
+            if len(parts) < 3:
+                continue
+            item_date = _as_date(parts[0])
+            close = _as_float(parts[2])
+            if item_date is not None and close is not None and close > 0:
+                result[item_date] = close
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("东方财富沪深300指数获取失败：%s", exc)
+        return {}
+
+
 def fetch_csi300_data(start: date, end: date) -> dict[date, dict[str, float | None]]:
     """抓取沪深300市盈率TTM、10年期国债收益率和指数收盘点位。
 
     风险溢价 = 1 / 市盈率TTM × 100 - 10年期国债到期收益率。
+    优先使用可直接返回长历史的公开接口，失败时回退到 AKShare。
     """
-    ak = _ak()
+    pe_map = _fetch_danjuan_pe()
+    bond_map = _fetch_eastmoney_bond(start)
+    index_map = _fetch_eastmoney_index(start, end)
 
-    pe_frame = None
-    for function_name in ("stock_zh_index_value_csindex", "index_value_csindex"):
-        function = getattr(ak, function_name, None)
-        if function is None:
-            continue
-        pe_frame = _retry(
-            f"沪深300估值（{function_name}）",
-            lambda f=function: f(symbol="000300"),
-            attempts=3,
-            pause=1.5,
-        )
+    ak = None
+    if not pe_map:
+        ak = _ak()
+        pe_frame = None
+        for function_name in ("stock_zh_index_value_csindex", "index_value_csindex"):
+            function = getattr(ak, function_name, None)
+            if function is None:
+                continue
+            pe_frame = _retry(
+                f"沪深300估值（{function_name}）",
+                lambda f=function: f(symbol="000300"),
+                attempts=3,
+                pause=1.5,
+            )
+            if pe_frame is not None and not pe_frame.empty:
+                break
         if pe_frame is not None and not pe_frame.empty:
-            break
+            value_column = "市盈率2" if "市盈率2" in pe_frame.columns else "市盈率TTM"
+            if value_column in pe_frame.columns:
+                for _, row in pe_frame.iterrows():
+                    item_date = _as_date(row.get("日期"))
+                    pe = _as_float(row.get(value_column))
+                    if item_date is not None and pe is not None and pe > 0:
+                        pe_map[item_date] = pe
 
-    bond_frame = _retry(
-        "中国10年期国债收益率",
-        lambda: ak.bond_zh_us_yield_em(start_date=start.strftime("%Y%m%d")),
-        attempts=3,
-        pause=2.0,
-    )
+    if not bond_map:
+        ak = ak or _ak()
+        bond_frame = _retry(
+            "中国10年期国债收益率",
+            lambda: ak.bond_zh_us_yield_em(start_date=start.strftime("%Y%m%d")),
+            attempts=3,
+            pause=2.0,
+        )
+        if bond_frame is not None and not bond_frame.empty:
+            bond_column = next(
+                (column for column in bond_frame.columns if "中国" in str(column) and "10年" in str(column)),
+                "中国国债收益率10年",
+            )
+            if bond_column in bond_frame.columns:
+                for _, row in bond_frame.iterrows():
+                    item_date = _as_date(row.get("日期"))
+                    bond = _as_float(row.get(bond_column))
+                    if item_date is not None and bond is not None:
+                        bond_map[item_date] = bond
 
-    index_frame = _retry(
-        "沪深300指数",
-        lambda: ak.index_hist_csindex(
-            symbol="000300",
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-        ),
-        attempts=3,
-        pause=1.5,
-    )
-    if index_frame is None or index_frame.empty:
-        logger.warning("中证指数历史行情为空，尝试东方财富指数历史")
+    if not index_map:
+        ak = ak or _ak()
         index_frame = _retry(
-            "东方财富沪深300指数",
-            lambda: ak.index_zh_a_hist(
+            "沪深300指数",
+            lambda: ak.index_hist_csindex(
                 symbol="000300",
-                period="daily",
                 start_date=start.strftime("%Y%m%d"),
                 end_date=end.strftime("%Y%m%d"),
             ),
             attempts=3,
             pause=1.5,
         )
+        if index_frame is None or index_frame.empty:
+            index_frame = _retry(
+                "东方财富沪深300指数",
+                lambda: ak.index_zh_a_hist(
+                    symbol="000300",
+                    period="daily",
+                    start_date=start.strftime("%Y%m%d"),
+                    end_date=end.strftime("%Y%m%d"),
+                ),
+                attempts=3,
+                pause=1.5,
+            )
+        if index_frame is not None and not index_frame.empty:
+            close_column = "收盘" if "收盘" in index_frame.columns else "收盘价"
+            if close_column in index_frame.columns:
+                for _, row in index_frame.iterrows():
+                    item_date = _as_date(row.get("日期"))
+                    close = _as_float(row.get(close_column))
+                    if item_date is not None and close is not None and close > 0:
+                        index_map[item_date] = close
 
-    pe_map: dict[date, float] = {}
-    if pe_frame is not None and not pe_frame.empty:
-        pe_column = "市盈率2" if "市盈率2" in pe_frame.columns else "市盈率TTM"
-        if pe_column in pe_frame.columns:
-            for _, row in pe_frame.iterrows():
-                item_date = _as_date(row.get("日期"))
-                pe = _as_float(row.get(pe_column))
-                if item_date is not None and pe is not None and pe > 0:
-                    pe_map[item_date] = pe
-        else:
-            logger.warning("中证指数估值表缺少市盈率TTM字段")
-
-    bond_map: dict[date, float] = {}
-    if bond_frame is not None and not bond_frame.empty:
-        bond_column = next(
-            (column for column in bond_frame.columns if "中国" in str(column) and "10年" in str(column)),
-            "中国国债收益率10年",
-        )
-        if bond_column in bond_frame.columns:
-            for _, row in bond_frame.iterrows():
-                item_date = _as_date(row.get("日期"))
-                bond = _as_float(row.get(bond_column))
-                if item_date is not None and bond is not None:
-                    bond_map[item_date] = bond
-
-    index_map: dict[date, float] = {}
-    if index_frame is not None and not index_frame.empty:
-        close_column = "收盘" if "收盘" in index_frame.columns else "收盘价"
-        if close_column in index_frame.columns:
-            for _, row in index_frame.iterrows():
-                item_date = _as_date(row.get("日期"))
-                close = _as_float(row.get(close_column))
-                if item_date is not None and close is not None and close > 0:
-                    index_map[item_date] = close
+    if not pe_map:
+        logger.warning("没有可用的沪深300市盈率数据")
 
     all_dates = set(pe_map) | set(bond_map) | set(index_map)
     result: dict[date, dict[str, float | None]] = {}
@@ -930,11 +1060,22 @@ def build_payload(
         close_values: list[float | None] = []
         pe_values: list[float | None] = []
         bond_values: list[float | None] = []
+        last_pe: float | None = None
+        last_bond: float | None = None
         for day in output_dates:
             values = csi300.get(day, {})
             pe = values.get("pe_ttm")
             bond = values.get("bond_yield")
             close = values.get("index_close")
+            # 韭圈儿 PE 为周频数据，按最近一次可得值对齐到交易日。
+            if pe is None:
+                pe = last_pe
+            else:
+                last_pe = pe
+            if bond is None:
+                bond = last_bond
+            else:
+                last_bond = bond
             risk = (100.0 / pe - bond) if pe and pe > 0 and bond is not None else None
             risk_values.append(round(risk, 2) if risk is not None else None)
             close_values.append(round(close, 2) if close is not None else None)
@@ -946,7 +1087,7 @@ def build_payload(
             "pe_ttm": pe_values,
             "bond_yield": bond_values,
             "formula": "1 / 沪深300市盈率TTM × 100 - 10年期国债到期收益率",
-            "source": "中证指数沪深300市盈率TTM；中债10年期国债收益率；中证指数沪深300收盘点位",
+            "source": "韭圈儿/中证指数沪深300市盈率TTM；中债10年期国债收益率；中证指数沪深300收盘点位",
         }
 
     return {
