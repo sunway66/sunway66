@@ -3,7 +3,7 @@
   "demo": false,
   "meta": {
     "title": "沪深300 ETF 复盘",
-    "generated_at": "2026-11-20T20:03:07+08:00",
+    "generated_at": "2026-11-20T21:45:13+08:00",
     "data_date": "2026-11-19",
     "latest_trade_date": "2026-11-20",
     "is_stale": true,
@@ -26,10 +26,7 @@
         "510330",
         "159919"
       ],
-      "nav": [
-        "510300",
-        "159919"
-      ]
+      "nav": []
     },
     "disclaimer": "净申购是一级市场申赎估算，不等同场内资金净流入；数据仅供参考，不构成投资建议。"
   },
@@ -26372,18 +26369,18 @@
   "previous": null,
   "market": {
     "date": "2026-11-20",
-    "as_of": "2026-11-20T20:03:02+08:00",
+    "as_of": "2026-11-20T21:45:08+08:00",
     "is_stale": false,
-    "total": 297,
-    "up": 13,
-    "down": 284,
-    "flat": 0,
+    "total": 389,
+    "up": 17,
+    "down": 370,
+    "flat": 2,
     "limit_up": 0,
-    "limit_down": 0,
-    "turnover": 72.43,
-    "turnover_sh": 0.0,
+    "limit_down": 1,
+    "turnover": 435.19,
+    "turnover_sh": 343.87,
     "turnover_sz": 0.0,
-    "turnover_bj": 72.43,
+    "turnover_bj": 91.32,
     "distribution": [
       {
         "key": "gt10",
@@ -26407,31 +26404,31 @@
         "key": "0to3",
         "label": "0~3%",
         "side": "up",
-        "count": 7
+        "count": 13
       },
       {
         "key": "0to_3",
         "label": "0~-3%",
         "side": "down",
-        "count": 36
+        "count": 47
       },
       {
         "key": "_3to_7",
         "label": "-3%~-7%",
         "side": "down",
-        "count": 212
+        "count": 262
       },
       {
         "key": "_7to_10",
         "label": "-7%~-10%",
         "side": "down",
-        "count": 26
+        "count": 45
       },
       {
         "key": "lt_10",
         "label": "<-10%",
         "side": "down",
-        "count": 10
+        "count": 16
       }
     ],
     "source": "东方财富 A 股行情（直连分页抓取，AKShare 兜底）",
