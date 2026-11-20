@@ -275,7 +275,7 @@ def build_market_payload(
         "turnover_sz": round(turnover_sz / 100_000_000, 2),
         "turnover_bj": round(turnover_bj / 100_000_000, 2),
         "distribution": distribution,
-        "source": "东方财富 A 股行情（AKShare stock_zh_a_spot_em）",
+        "source": "东方财富 A 股行情（直连分页抓取，AKShare 兜底）",
         "limit_note": "涨停/跌停按板块涨跌停幅度与收盘涨跌幅统计，已排除 N/C 开头新股",
     }
 
@@ -498,8 +498,77 @@ def fetch_navs(codes: Iterable[str], start: date, end: date) -> dict[str, dict[d
     return result
 
 
+def _fetch_eastmoney_spot() -> list[tuple[str, str, float, float | None]]:
+    """直接分页抓取东方财富沪深京 A 股行情，作为 AKShare 行情接口的兜底。"""
+    import math
+    import requests
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://quote.eastmoney.com/"}
+    base_params = {
+        "po": "1",
+        "np": "1",
+        "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+        "fltt": "2",
+        "invt": "2",
+        "fid": "f12",
+        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23,m:0+t:81+s:2048",
+        "fields": "f12,f14,f3,f6",
+    }
+    stocks: list[tuple[str, str, float, float | None]] = []
+    try:
+        first = requests.get(
+            url,
+            params={**base_params, "pn": "1", "pz": "100"},
+            headers=headers,
+            timeout=20,
+        )
+        first.raise_for_status()
+        first_data = first.json().get("data") or {}
+        total = int(first_data.get("total") or 0)
+        pages = min(max(1, math.ceil(total / 100)), 80)
+        rows = first_data.get("diff") or []
+        for page in range(1, pages + 1):
+            if page > 1:
+                response = requests.get(
+                    url,
+                    params={**base_params, "pn": str(page), "pz": "100"},
+                    headers=headers,
+                    timeout=20,
+                )
+                response.raise_for_status()
+                rows = (response.json().get("data") or {}).get("diff") or []
+            for row in rows:
+                code = _normalize_code(row.get("f12"))
+                name = str(row.get("f14") or "").strip()
+                pct = _as_float(row.get("f3"))
+                amount = _as_float(row.get("f6"))
+                if code and pct is not None:
+                    stocks.append((code, name, pct, amount))
+            time.sleep(0.03)
+        logger.info("东方财富全市场行情直接抓取 %s 只（共 %s 页）", len(stocks), pages)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("东方财富全市场行情直接抓取失败：%s", exc)
+    return stocks
+
+
 def fetch_market_snapshot(market_date: date) -> dict[str, Any] | None:
     """抓取全市场 A 股行情，生成当日涨跌分布与成交额。"""
+    direct_stocks = _fetch_eastmoney_spot()
+    if direct_stocks:
+        payload = build_market_payload(direct_stocks, market_date)
+        logger.info(
+            "大盘盘面：%s 只，涨/平/跌=%s/%s/%s，涨停/跌停=%s/%s，成交额=%.2f 亿元",
+            payload["total"],
+            payload["up"],
+            payload["flat"],
+            payload["down"],
+            payload["limit_up"],
+            payload["limit_down"],
+            payload["turnover"],
+        )
+        return payload
+
     ak = _ak()
     frame = _retry(
         "A 股全市场行情",

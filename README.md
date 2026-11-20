@@ -100,7 +100,7 @@
 
 | 数据 | 来源 | AKShare 函数 |
 |---|---|---|
-| 全市场个股涨跌幅、成交额 | 东方财富沪深京 A 股 | `stock_zh_a_spot_em()` |
+| 全市场个股涨跌幅、成交额 | 东方财富沪深京 A 股 | 直连分页抓取，`stock_zh_a_spot_em()` 兜底 |
 | 上交所每日 ETF 份额 | 上交所 ETF 基金规模 | `fund_etf_scale_sse(date=...)` |
 | 深交所每日 ETF 份额 | 深交所基金规模日频 | `fund_scale_daily_szse(start_date, end_date, symbol="ETF")` |
 | 场内基金历史单位净值 | 东方财富天天基金 | `fund_etf_fund_info_em(fund, start_date, end_date)` |
