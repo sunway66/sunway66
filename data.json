@@ -3,7 +3,7 @@
   "demo": false,
   "meta": {
     "title": "沪深300 ETF 复盘",
-    "generated_at": "2026-11-26T19:02:24+08:00",
+    "generated_at": "2026-11-26T20:08:11+08:00",
     "data_date": "2026-11-25",
     "latest_trade_date": "2026-11-26",
     "is_stale": true,
@@ -27,9 +27,7 @@
         "159919"
       ],
       "nav": [
-        "510300",
         "510310",
-        "510330",
         "159919"
       ]
     },
@@ -26373,19 +26371,19 @@
   },
   "previous": null,
   "market": {
-    "date": "2026-11-25",
-    "as_of": "2026-11-25T21:50:57+08:00",
-    "is_stale": true,
-    "total": 99,
-    "up": 3,
-    "down": 96,
-    "flat": 0,
+    "date": "2026-11-26",
+    "as_of": "2026-11-26T20:08:06+08:00",
+    "is_stale": false,
+    "total": 297,
+    "up": 64,
+    "down": 227,
+    "flat": 6,
     "limit_up": 0,
-    "limit_down": 0,
-    "turnover": 21.41,
+    "limit_down": 1,
+    "turnover": 66.48,
     "turnover_sh": 0.0,
     "turnover_sz": 0.0,
-    "turnover_bj": 21.41,
+    "turnover_bj": 66.48,
     "distribution": [
       {
         "key": "gt10",
@@ -26397,48 +26395,47 @@
         "key": "7to10",
         "label": "7%~10%",
         "side": "up",
-        "count": 0
+        "count": 5
       },
       {
         "key": "3to7",
         "label": "3%~7%",
         "side": "up",
-        "count": 0
+        "count": 12
       },
       {
         "key": "0to3",
         "label": "0~3%",
         "side": "up",
-        "count": 3
+        "count": 53
       },
       {
         "key": "0to_3",
         "label": "0~-3%",
         "side": "down",
-        "count": 19
+        "count": 197
       },
       {
         "key": "_3to_7",
         "label": "-3%~-7%",
         "side": "down",
-        "count": 68
+        "count": 27
       },
       {
         "key": "_7to_10",
         "label": "-7%~-10%",
         "side": "down",
-        "count": 7
+        "count": 2
       },
       {
         "key": "lt_10",
         "label": "<-10%",
         "side": "down",
-        "count": 2
+        "count": 1
       }
     ],
     "source": "东方财富 A 股行情（直连分页抓取，AKShare 兜底）",
-    "limit_note": "涨停/跌停按板块涨跌停幅度与收盘涨跌幅统计，已排除 N/C 开头新股",
-    "stale_reason": "当日全市场行情暂不可用，展示上一次成功获取的数据"
+    "limit_note": "涨停/跌停按板块涨跌停幅度与收盘涨跌幅统计，已排除 N/C 开头新股"
   },
   "csi300": {
     "risk_premium": [
