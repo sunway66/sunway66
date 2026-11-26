@@ -3,7 +3,7 @@
   "demo": false,
   "meta": {
     "title": "沪深300 ETF 复盘",
-    "generated_at": "2026-11-26T20:08:11+08:00",
+    "generated_at": "2026-11-26T21:50:53+08:00",
     "data_date": "2026-11-25",
     "latest_trade_date": "2026-11-26",
     "is_stale": true,
@@ -26,10 +26,7 @@
         "510330",
         "159919"
       ],
-      "nav": [
-        "510310",
-        "159919"
-      ]
+      "nav": []
     },
     "disclaimer": "净申购是一级市场申赎估算，不等同场内资金净流入；数据仅供参考，不构成投资建议。"
   },
@@ -26372,24 +26369,24 @@
   "previous": null,
   "market": {
     "date": "2026-11-26",
-    "as_of": "2026-11-26T20:08:06+08:00",
+    "as_of": "2026-11-26T21:50:48+08:00",
     "is_stale": false,
-    "total": 297,
-    "up": 64,
-    "down": 227,
-    "flat": 6,
+    "total": 390,
+    "up": 91,
+    "down": 292,
+    "flat": 7,
     "limit_up": 0,
     "limit_down": 1,
-    "turnover": 66.48,
-    "turnover_sh": 0.0,
+    "turnover": 400.33,
+    "turnover_sh": 312.64,
     "turnover_sz": 0.0,
-    "turnover_bj": 66.48,
+    "turnover_bj": 87.7,
     "distribution": [
       {
         "key": "gt10",
         "label": ">10%",
         "side": "up",
-        "count": 0
+        "count": 1
       },
       {
         "key": "7to10",
@@ -26401,31 +26398,31 @@
         "key": "3to7",
         "label": "3%~7%",
         "side": "up",
-        "count": 12
+        "count": 15
       },
       {
         "key": "0to3",
         "label": "0~3%",
         "side": "up",
-        "count": 53
+        "count": 77
       },
       {
         "key": "0to_3",
         "label": "0~-3%",
         "side": "down",
-        "count": 197
+        "count": 248
       },
       {
         "key": "_3to_7",
         "label": "-3%~-7%",
         "side": "down",
-        "count": 27
+        "count": 40
       },
       {
         "key": "_7to_10",
         "label": "-7%~-10%",
         "side": "down",
-        "count": 2
+        "count": 3
       },
       {
         "key": "lt_10",
